@@ -9,14 +9,20 @@ import AddProduct from "./pages/AddProduct";
 import Donations from "./pages/Donations";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import FluidCursor from "./components/fluidCursor";
+import ProfileSetupModal from "./components/ProfileSetupModal";
+import Chatbot from "./components/Chatbot";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
+      <FluidCursor/>
       <Toaster />
       <Sonner />
+      <ProfileSetupModal />
+      <Chatbot />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Landing />} />

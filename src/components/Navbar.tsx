@@ -4,26 +4,30 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useProductStore } from '@/store/useProductStore';
 import AuthModal from '@/components/AuthModal';
-import { 
-  Home, 
-  LayoutDashboard, 
-  Plus, 
-  Heart, 
-  Settings, 
-  Menu, 
+import AppFeedbackModal from '@/components/AppFeedbackModal';
+import {
+  Home,
+  LayoutDashboard,
+  Plus,
+  Heart,
+  Settings,
+  Menu,
   X,
   Shield,
   User,
-  LogOut
+  LogOut,
+  Sun,
+  Moon,
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const location = useLocation();
-  const { theme, toggleTheme, user, signOut } = useProductStore();
+  const { theme, toggleTheme, user, signOut, showAuthModal, setShowAuthModal } = useProductStore();
 
   const handleSignOut = async () => {
     try {
@@ -144,15 +148,65 @@ const Navbar = () => {
                 variant="ghost"
                 size="icon"
                 onClick={toggleTheme}
-                className="hidden md:flex"
+                className="hidden md:flex relative overflow-hidden group w-12 h-12 rounded-full border border-border-glass/50 backdrop-blur-sm bg-card-glass/30 hover:bg-card-glass/50 transition-all duration-300"
               >
+                <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-accent/10 to-secondary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-full" />
                 <motion.div
-                  initial={{ rotate: 0 }}
-                  animate={{ rotate: theme === 'light' ? 180 : 0 }}
-                  transition={{ duration: 0.3 }}
+                  initial={{ rotate: 0, scale: 1 }}
+                  animate={{
+                    rotate: theme === 'light' ? 180 : 0,
+                    scale: theme === 'light' ? 1.1 : 1
+                  }}
+                  transition={{ duration: 0.6, type: "spring", stiffness: 200, damping: 15 }}
+                  className="relative z-10 flex items-center justify-center"
                 >
-                  {theme === 'dark' ? '🌙' : '☀️'}
+                  <motion.div
+                    animate={{
+                      background: theme === 'dark'
+                        ? 'radial-gradient(circle, hsl(217, 91%, 60%) 0%, hsl(217, 91%, 60%) 50%, transparent 70%)'
+                        : 'radial-gradient(circle, hsl(45, 93%, 58%) 0%, hsl(45, 93%, 58%) 50%, transparent 70%)'
+                    }}
+                    transition={{ duration: 0.3 }}
+                    className="absolute inset-0 rounded-full blur-sm opacity-60"
+                  />
+                  {theme === 'dark' ? (
+                    <Moon className="h-5 w-5 text-blue-400 drop-shadow-lg" />
+                  ) : (
+                    <Sun className="h-5 w-5 text-amber-500 drop-shadow-lg" />
+                  )}
                 </motion.div>
+                <motion.div
+                  animate={{
+                    x: theme === 'light' ? 20 : 0,
+                    opacity: theme === 'light' ? 0 : 1
+                  }}
+                  transition={{ duration: 0.3, delay: 0.1 }}
+                  className="absolute inset-0 flex items-center justify-center"
+                >
+                  <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse" />
+                </motion.div>
+                <motion.div
+                  animate={{
+                    x: theme === 'dark' ? -20 : 0,
+                    opacity: theme === 'dark' ? 0 : 1
+                  }}
+                  transition={{ duration: 0.3, delay: 0.1 }}
+                  className="absolute inset-0 flex items-center justify-center"
+                >
+                  <div className="w-1 h-1 bg-amber-500 rounded-full animate-pulse" />
+                </motion.div>
+              </Button>
+
+              {/* Feedback Button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowFeedbackModal(true)}
+                className="hidden md:flex relative overflow-hidden group w-12 h-12 rounded-full border border-border-glass/50 backdrop-blur-sm bg-card-glass/30 hover:bg-card-glass/50 transition-all duration-300"
+                title="Feedback"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-full" />
+                <MessageSquare className="h-5 w-5 text-blue-400 drop-shadow-lg relative z-10" />
               </Button>
 
               {/* Mobile Menu Button */}
@@ -232,10 +286,20 @@ const Navbar = () => {
                 <Button
                   variant="ghost"
                   onClick={toggleTheme}
-                  className="justify-start"
+                  className="justify-start group"
                 >
-                  {theme === 'dark' ? '🌙' : '☀️'}
-                  Theme
+                  <motion.div
+                    animate={{ rotate: theme === 'light' ? 180 : 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="mr-2"
+                  >
+                    {theme === 'dark' ? (
+                      <Moon className="h-4 w-4 text-blue-400" />
+                    ) : (
+                      <Sun className="h-4 w-4 text-amber-500" />
+                    )}
+                  </motion.div>
+                  {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
                 </Button>
               </div>
             </div>
@@ -244,6 +308,7 @@ const Navbar = () => {
       </AnimatePresence>
       
       <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      <AppFeedbackModal isOpen={showFeedbackModal} onClose={() => setShowFeedbackModal(false)} />
     </>
   );
 };

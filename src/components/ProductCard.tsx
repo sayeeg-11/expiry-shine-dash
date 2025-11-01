@@ -10,10 +10,11 @@ interface ProductCardProps {
   product: Product;
   onDelete?: (id: string) => void;
   onDonate?: (product: Product) => void;
+  onClick?: (product: Product) => void;
   index?: number;
 }
 
-const ProductCard = ({ product, onDelete, onDonate, index = 0 }: ProductCardProps) => {
+const ProductCard = ({ product, onDelete, onDonate, onClick, index = 0 }: ProductCardProps) => {
   const getStatusIcon = () => {
     switch (product.status) {
       case 'expired':
@@ -62,7 +63,10 @@ const ProductCard = ({ product, onDelete, onDonate, index = 0 }: ProductCardProp
       }}
       className="group"
     >
-      <div className="glass-card p-5 hover:shadow-glow-primary transition-all duration-300 relative overflow-hidden">
+      <div 
+        className="glass-card p-5 hover:shadow-glow-primary transition-all duration-300 relative overflow-hidden cursor-pointer"
+        onClick={() => onClick?.(product)}
+      >
         {/* Scan Effect on Hover */}
         <div className="scan-effect absolute inset-0 opacity-0 group-hover:opacity-100" />
         

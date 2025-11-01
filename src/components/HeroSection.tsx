@@ -139,8 +139,8 @@ const HeroSection = () => {
               ref={titleRef}
               className="text-4xl md:text-6xl lg:text-7xl font-bold leading-tight"
             >
-              Never Let
-              <span className="gradient-text block">Food Expire</span>
+              Never
+              <span className="gradient-text block">Product Will Expire</span>
               Again
             </h1>
 

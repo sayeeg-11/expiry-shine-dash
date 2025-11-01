@@ -17,17 +17,25 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useProductStore } from '@/store/useProductStore';
 import { cn } from '@/lib/utils';
 
 const AddProduct = () => {
   const navigate = useNavigate();
+  const { addProduct } = useProductStore();
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [productData, setProductData] = useState({
     name: '',
     category: 'food',
     expiryDate: '',
-    description: ''
+    description: '',
+    imageUrl: '',
+    nutrients: null as any,
+    brand: '',
+    barcode: '',
+    ingredients: ''
   });
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -55,12 +63,79 @@ const AddProduct = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log('Product data:', productData);
-    console.log('Selected file:', selectedFile);
-    // Here you would typically upload the file and save the product
-    navigate('/dashboard');
+  const uploadImage = async (file: File) => {
+    setUploading(true);
+    try {
+      // Step 1: Upload image
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const imageResponse = await fetch('http://localhost:3001/api/upload/image', {
+        method: 'POST',
+        body: formData,
+      });
+      const imageResult = await imageResponse.json();
+      
+      // Step 2: Lookup barcode
+      console.log('Looking up barcode:', productData.barcode);
+      const barcodeResponse = await fetch('http://localhost:3001/api/upload/barcode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ barcode: productData.barcode })
+      });
+      
+      console.log('Barcode response status:', barcodeResponse.status);
+      const barcodeResult = await barcodeResponse.json();
+      console.log('Barcode result:', barcodeResult);
+      
+      // Combine results
+      if (barcodeResult.productDetails) {
+        setProductData({
+          name: barcodeResult.productDetails.name,
+          category: barcodeResult.productDetails.category,
+          expiryDate: imageResult.detectedExpiryDate || barcodeResult.productDetails.expiryDate,
+          description: `${barcodeResult.productDetails.brand} - Auto-detected`,
+          imageUrl: imageResult.imageUrl,
+          nutrients: barcodeResult.productDetails.nutrients,
+          brand: barcodeResult.productDetails.brand || '',
+          barcode: productData.barcode,
+          ingredients: barcodeResult.productDetails.ingredients || ''
+        });
+      } else {
+        console.log('No product details from barcode API, using fallback');
+        setProductData(prev => ({ 
+          ...prev, 
+          imageUrl: imageResult.imageUrl
+        }));
+      }
+    } catch (error) {
+      console.error('Upload failed:', error);
+      alert('Upload failed: ' + error.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    
+    try {
+      await addProduct({
+        name: productData.name,
+        category: productData.category as 'food' | 'medicine' | 'cosmetic' | 'other',
+        expiryDate: productData.expiryDate,
+        imageUrl: productData.imageUrl,
+        nutrients: productData.nutrients,
+        brand: productData.brand,
+        barcode: productData.barcode,
+        ingredients: productData.ingredients
+      });
+      
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Failed to save product:', error);
+      alert('Failed to save product. Please try again.');
+    }
   };
 
   const categories = [
@@ -108,7 +183,23 @@ const AddProduct = () => {
               </TabsList>
 
               <TabsContent value="upload" className="space-y-6">
-                {/* Upload Section */}
+                {/* Barcode Input Section */}
+                <div className="glass-card p-6 space-y-4">
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <Tag className="h-5 w-5 text-primary" />
+                    Enter Barcode
+                  </h3>
+                  <div className="flex gap-3">
+                    <Input
+                      placeholder="Enter barcode number (required)"
+                      value={productData.barcode || ''}
+                      onChange={(e) => setProductData(prev => ({ ...prev, barcode: e.target.value }))}
+                      className="flex-1"
+                      required
+                    />
+                  </div>
+                </div>
+                
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -141,8 +232,11 @@ const AddProduct = () => {
                     >
                       <CheckCircle className="h-16 w-16 text-success mx-auto" />
                       <div>
-                        <p className="text-lg font-semibold text-success">File uploaded successfully!</p>
+                        <p className="text-lg font-semibold text-success">Image Ready!</p>
                         <p className="text-muted-foreground">{selectedFile.name}</p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Now enter barcode above and click Lookup button
+                        </p>
                       </div>
                     </motion.div>
                   ) : (
@@ -160,12 +254,145 @@ const AddProduct = () => {
                         </p>
                         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                           <Sparkles className="h-4 w-4" />
-                          AI will automatically detect expiry dates
+                          Upload photo + enter barcode above, then click Lookup
                         </div>
                       </div>
                     </div>
                   )}
                 </motion.div>
+                
+                {/* Lookup Button */}
+                {selectedFile && productData.barcode && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-center"
+                  >
+                    <Button
+                      onClick={() => uploadImage(selectedFile)}
+                      variant="neon"
+                      size="lg"
+                      disabled={uploading}
+                      className="group"
+                    >
+                      {uploading ? (
+                        <>
+                          <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-5 w-5 group-hover:scale-110 transition-transform" />
+                          Lookup Product Details
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Combines barcode + photo for complete auto-fill
+                    </p>
+                  </motion.div>
+                )}
+                
+                {/* Product Details Display */}
+                {productData.name && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="glass-card p-6 space-y-4"
+                  >
+                    <div className="flex items-center gap-2 mb-4">
+                      <Sparkles className="h-5 w-5 text-primary" />
+                      <h3 className="text-lg font-semibold">Detected Product Information</h3>
+                    </div>
+                    
+                    <div className="grid md:grid-cols-2 gap-6">
+                      {/* Product Image */}
+                      {productData.imageUrl && (
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Product Image</Label>
+                          <img 
+                            src={productData.imageUrl} 
+                            alt={productData.name}
+                            className="w-full h-48 object-cover rounded-lg border border-border-glass/50"
+                          />
+                        </div>
+                      )}
+                      
+                      {/* Product Details */}
+                      <div className="space-y-4">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Product Name</Label>
+                          <p className="text-lg font-semibold">{productData.name}</p>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Category</Label>
+                          <p className="capitalize">{productData.category}</p>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Expiry Date</Label>
+                          <p className="font-medium">{productData.expiryDate}</p>
+                        </div>
+                        
+                        {productData.description && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Description</Label>
+                            <p className="text-sm">{productData.description}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Nutrients */}
+                    {productData.nutrients && (
+                      <div className="space-y-3">
+                        <Label className="text-sm font-medium text-muted-foreground">Nutritional Information</Label>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {Object.entries(productData.nutrients).filter(([_, value]) => value).map(([key, value]) => (
+                            <div key={key} className="bg-background-glass/50 p-3 rounded-lg text-center">
+                              <div className="text-xs text-muted-foreground capitalize">{key}</div>
+                              <div className="font-semibold text-sm">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Action Buttons */}
+                    <div className="flex gap-3 pt-4">
+                      <Button
+                        variant="glass"
+                        onClick={() => {
+                          setProductData({
+                            name: '',
+                            category: 'food',
+                            expiryDate: '',
+                            description: '',
+                            imageUrl: '',
+                            nutrients: null,
+                            brand: '',
+                            barcode: '',
+                            ingredients: ''
+                          });
+                          setSelectedFile(null);
+                        }}
+                        className="flex-1"
+                      >
+                        Scan Another
+                      </Button>
+                      <Button
+                        variant="neon"
+                        onClick={handleSubmit}
+                        className="flex-1 group"
+                      >
+                        <Package className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                        Add to Dashboard
+                      </Button>
+                    </div>
+                  </motion.div>
+                )}
               </TabsContent>
 
               <TabsContent value="scan" className="space-y-6">
@@ -173,20 +400,75 @@ const AddProduct = () => {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ duration: 0.5 }}
-                  className="glass-card p-12 text-center"
+                  className="space-y-6"
                 >
-                  <Camera className="h-16 w-16 text-primary mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold mb-2">Barcode Scanner</h3>
-                  <p className="text-muted-foreground mb-6">
-                    Point your camera at the barcode to automatically detect product information
-                  </p>
-                  <Button variant="neon" size="lg" className="group">
-                    <Camera className="h-5 w-5 group-hover:scale-110 transition-transform" />
-                    Start Scanning
-                  </Button>
-                  <p className="text-xs text-muted-foreground mt-4">
-                    Camera access required for barcode scanning
-                  </p>
+                  {/* Manual Barcode Input */}
+                  <div className="glass-card p-6">
+                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                      <Tag className="h-5 w-5 text-primary" />
+                      Enter Barcode Manually
+                    </h3>
+                    <div className="flex gap-3">
+                      <Input
+                        placeholder="Enter barcode number (e.g., 123456789012)"
+                        value={productData.barcode || ''}
+                        onChange={(e) => setProductData(prev => ({ ...prev, barcode: e.target.value }))}
+                        className="flex-1"
+                      />
+                      <Button
+                        onClick={async () => {
+                          if (productData.barcode) {
+                            setUploading(true);
+                            try {
+                              const response = await fetch('http://localhost:3001/api/upload/barcode', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ barcode: productData.barcode })
+                              });
+                              const result = await response.json();
+                              if (result.productDetails) {
+                                setProductData({
+                                  ...productData,
+                                  name: result.productDetails.name,
+                                  category: result.productDetails.category,
+                                  expiryDate: result.productDetails.expiryDate,
+                                  description: `${result.productDetails.brand} - Auto-detected from barcode`,
+                                  nutrients: result.productDetails.nutrients,
+                                  brand: result.productDetails.brand || '',
+                                  barcode: result.barcode || '',
+                                  ingredients: result.productDetails.ingredients || ''
+                                });
+                              }
+                            } catch (error) {
+                              console.error('Barcode lookup failed:', error);
+                            } finally {
+                              setUploading(false);
+                            }
+                          }
+                        }}
+                        variant="neon"
+                        disabled={!productData.barcode || uploading}
+                      >
+                        {uploading ? 'Looking up...' : 'Lookup'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Camera Scanner */}
+                  <div className="glass-card p-12 text-center">
+                    <Camera className="h-16 w-16 text-primary mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold mb-2">Camera Barcode Scanner</h3>
+                    <p className="text-muted-foreground mb-6">
+                      Point your camera at the barcode to automatically detect product information
+                    </p>
+                    <Button variant="glass" size="lg" className="group">
+                      <Camera className="h-5 w-5 group-hover:scale-110 transition-transform" />
+                      Start Camera (Coming Soon)
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-4">
+                      For now, use manual barcode entry above or upload product image
+                    </p>
+                  </div>
                 </motion.div>
               </TabsContent>
 
@@ -273,6 +555,24 @@ const AddProduct = () => {
                         className="w-full p-3 rounded-xl glass-card border border-border-glass/50 focus:border-primary/50 bg-transparent resize-none h-24 focus:outline-none focus:ring-2 focus:ring-primary/20"
                       />
                     </div>
+
+                    {/* Nutrients (Auto-detected) */}
+                    {productData.nutrients && (
+                      <div className="space-y-3">
+                        <Label className="text-base font-semibold flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                          Nutritional Information (Auto-detected)
+                        </Label>
+                        <div className="glass-card p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
+                          {Object.entries(productData.nutrients).map(([key, value]) => (
+                            <div key={key} className="text-center">
+                              <div className="text-sm text-muted-foreground capitalize">{key}</div>
+                              <div className="font-semibold">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Action Buttons */}
                     <div className="flex gap-4 pt-4">

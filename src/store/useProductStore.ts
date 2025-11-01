@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { supabase, type Database } from '@/lib/supabase';
+import { api } from '@/lib/mongodb';
 
 export interface Product {
   id: string;
@@ -8,6 +8,10 @@ export interface Product {
   expiryDate: string;
   status: 'active' | 'soon-expiring' | 'expired';
   imageUrl?: string;
+  nutrients?: any;
+  brand?: string;
+  barcode?: string;
+  ingredients?: string;
   addedDate: string;
   daysUntilExpiry: number;
 }
@@ -21,13 +25,30 @@ export interface DonationItem {
   isAvailable: boolean;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  token: string;
+  profile?: {
+    name: string;
+    phone?: string;
+    dateOfBirth?: string;
+    healthConditions: string[];
+    allergies: string[];
+    dietaryPreferences: string[];
+    isProfileComplete: boolean;
+  };
+}
+
 interface ProductStore {
   products: Product[];
   donations: DonationItem[];
   theme: 'dark' | 'light';
   loading: boolean;
-  user: any;
-  init: () => Promise<void>;
+  user: User | null;
+  showProfileSetup: boolean;
+  showAuthModal: boolean;
+  init: () => void;
   addProduct: (product: Omit<Product, 'id' | 'addedDate' | 'daysUntilExpiry'>) => Promise<void>;
   removeProduct: (id: string) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
@@ -36,7 +57,10 @@ interface ProductStore {
   fetchDonations: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  signOut: () => void;
+  updateProfile: (profile: any) => Promise<void>;
+  setShowProfileSetup: (show: boolean) => void;
+  setShowAuthModal: (show: boolean) => void;
   toggleTheme: () => void;
   calculateStatus: (expiryDate: string) => Product['status'];
   calculateDaysUntilExpiry: (expiryDate: string) => number;
@@ -48,16 +72,24 @@ export const useProductStore = create<ProductStore>((set, get) => ({
   theme: 'dark',
   loading: false,
   user: null,
+  showProfileSetup: false,
+  showAuthModal: false,
 
   // Initialize auth state
-  init: async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    set({ user });
+  init: () => {
+    const token = localStorage.getItem('authToken');
+    const userStr = localStorage.getItem('user');
     
-    // Listen for auth changes
-    supabase.auth.onAuthStateChange((event, session) => {
-      set({ user: session?.user || null });
-    });
+    if (token && userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        set({ user: { ...user, token } });
+        get().fetchProducts();
+      } catch (error) {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
+      }
+    }
   },
 
   addProduct: async (productData) => {
@@ -66,126 +98,86 @@ export const useProductStore = create<ProductStore>((set, get) => ({
 
     set({ loading: true });
     
-    const daysUntilExpiry = get().calculateDaysUntilExpiry(productData.expiryDate);
-    const status = get().calculateStatus(productData.expiryDate);
-    
-    const { data, error } = await supabase
-      .from('products')
-      .insert({
+    try {
+      const response = await api.post('/products', {
         name: productData.name,
         category: productData.category,
-        expiry_date: productData.expiryDate,
-        image_url: productData.imageUrl,
-        status,
-        days_until_expiry: daysUntilExpiry,
-        user_id: user.id,
-      })
-      .select()
-      .single();
+        expiryDate: productData.expiryDate,
+        imageUrl: productData.imageUrl,
+        nutrients: productData.nutrients,
+        brand: productData.brand,
+        barcode: productData.barcode,
+        ingredients: productData.ingredients,
+      });
 
-    if (error) throw error;
+      const product: Product = response.data;
 
-    const product: Product = {
-      id: data.id,
-      name: data.name,
-      category: data.category,
-      expiryDate: data.expiry_date,
-      status: data.status,
-      imageUrl: data.image_url,
-      addedDate: data.added_date,
-      daysUntilExpiry: data.days_until_expiry,
-    };
-
-    set((state) => ({
-      products: [...state.products, product],
-      loading: false,
-    }));
+      set((state) => ({
+        products: [...state.products, product],
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Failed to add product');
+    }
   },
 
   removeProduct: async (id) => {
     set({ loading: true });
     
-    const { error } = await supabase
-      .from('products')
-      .delete()
-      .eq('id', id);
+    try {
+      await api.delete(`/products/${id}`);
 
-    if (error) throw error;
-
-    set((state) => ({
-      products: state.products.filter((p) => p.id !== id),
-      loading: false,
-    }));
+      set((state) => ({
+        products: state.products.filter((p) => p.id !== id),
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Failed to remove product');
+    }
   },
 
   updateProduct: async (id, updates) => {
     set({ loading: true });
     
-    const updateData: any = { ...updates };
-    if (updates.expiryDate) {
-      updateData.expiry_date = updates.expiryDate;
-      updateData.days_until_expiry = get().calculateDaysUntilExpiry(updates.expiryDate);
-      updateData.status = get().calculateStatus(updates.expiryDate);
-      delete updateData.expiryDate;
+    try {
+      const response = await api.put(`/products/${id}`, updates);
+      const updatedProduct: Product = response.data;
+
+      set((state) => ({
+        products: state.products.map((p) =>
+          p.id === id ? updatedProduct : p
+        ),
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Failed to update product');
     }
-
-    const { data, error } = await supabase
-      .from('products')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    set((state) => ({
-      products: state.products.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              name: data.name,
-              category: data.category,
-              expiryDate: data.expiry_date,
-              status: data.status,
-              imageUrl: data.image_url,
-              daysUntilExpiry: data.days_until_expiry,
-            }
-          : p
-      ),
-      loading: false,
-    }));
   },
 
   addDonation: async (donationData) => {
     set({ loading: true });
     
-    const { data, error } = await supabase
-      .from('donations')
-      .insert({
-        product_id: donationData.product.id,
-        donated_by: donationData.donatedBy,
+    try {
+      const response = await api.post('/donations', {
+        productId: donationData.product.id,
+        donatedBy: donationData.donatedBy,
         location: donationData.location,
-        contact_info: donationData.contactInfo,
-        is_available: donationData.isAvailable,
-      })
-      .select()
-      .single();
+        contactInfo: donationData.contactInfo,
+      });
 
-    if (error) throw error;
+      const donation: DonationItem = response.data;
 
-    const donation: DonationItem = {
-      id: data.id,
-      product: donationData.product,
-      donatedBy: data.donated_by,
-      location: data.location,
-      contactInfo: data.contact_info,
-      isAvailable: data.is_available,
-    };
-
-    set((state) => ({
-      donations: [...state.donations, donation],
-      loading: false,
-    }));
+      set((state) => ({
+        donations: [...state.donations, donation],
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Failed to add donation');
+    }
   },
 
   fetchProducts: async () => {
@@ -194,81 +186,128 @@ export const useProductStore = create<ProductStore>((set, get) => ({
 
     set({ loading: true });
 
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('added_date', { ascending: false });
+    try {
+      const response = await api.get('/products');
+      const products: Product[] = response.data;
 
-    if (error) throw error;
-
-    const products: Product[] = data.map((item) => ({
-      id: item.id,
-      name: item.name,
-      category: item.category,
-      expiryDate: item.expiry_date,
-      status: item.status,
-      imageUrl: item.image_url,
-      addedDate: item.added_date,
-      daysUntilExpiry: item.days_until_expiry,
-    }));
-
-    set({ products, loading: false });
+      set({ products, loading: false });
+    } catch (error: any) {
+      set({ loading: false });
+      console.error('Failed to fetch products:', error.response?.data?.error || error.message);
+    }
   },
 
   fetchDonations: async () => {
     set({ loading: true });
 
-    const { data, error } = await supabase
-      .from('donations')
-      .select(`
-        *,
-        products (*)
-      `)
-      .eq('is_available', true)
-      .order('created_at', { ascending: false });
+    try {
+      const response = await api.get('/donations');
+      const donations: DonationItem[] = response.data;
 
-    if (error) throw error;
-
-    // Transform data to match DonationItem interface
-    // Note: This would need proper join handling in real implementation
-    set({ donations: [], loading: false });
+      set({ donations, loading: false });
+    } catch (error: any) {
+      set({ loading: false });
+      console.error('Failed to fetch donations:', error.response?.data?.error || error.message);
+    }
   },
 
   signIn: async (email, password) => {
     set({ loading: true });
     
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const response = await api.post('/auth/login', {
+        email,
+        password,
+      });
 
-    if (error) throw error;
+      const { token, user } = response.data;
+      
+      localStorage.setItem('authToken', token);
+      localStorage.setItem('user', JSON.stringify(user));
 
-    set({ user: data.user, loading: false });
+      const needsProfileSetup = !user.profile?.isProfileComplete;
+      
+      set({ 
+        user: { ...user, token }, 
+        loading: false,
+        showProfileSetup: needsProfileSetup,
+        showAuthModal: false
+      });
+      
+      if (!needsProfileSetup) {
+        get().fetchProducts();
+      }
+    } catch (error: any) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Login failed');
+    }
   },
 
   signUp: async (email, password) => {
     set({ loading: true });
     
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    try {
+      const response = await api.post('/auth/register', {
+        email,
+        password,
+      });
 
-    if (error) throw error;
+      const { token, user } = response.data;
+      
+      localStorage.setItem('authToken', token);
+      localStorage.setItem('user', JSON.stringify(user));
 
-    set({ user: data.user, loading: false });
+      set({ 
+        user: { ...user, token }, 
+        loading: false, 
+        showProfileSetup: true,
+        showAuthModal: false
+      });
+    } catch (error: any) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Registration failed');
+    }
   },
 
-  signOut: async () => {
+  signOut: () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
+    
+    set({ user: null, products: [], donations: [], loading: false, showProfileSetup: false });
+  },
+
+  updateProfile: async (profileData) => {
+    const { user } = get();
+    if (!user) throw new Error('User must be logged in');
+
     set({ loading: true });
     
-    const { error } = await supabase.auth.signOut();
-    
-    if (error) throw error;
+    try {
+      const response = await api.put('/auth/profile', profileData);
+      const updatedUserData = response.data.user;
+      
+      // Update user in localStorage
+      localStorage.setItem('user', JSON.stringify(updatedUserData));
+      
+      set({ 
+        user: { ...user, profile: updatedUserData.profile }, 
+        loading: false,
+        showProfileSetup: false
+      });
+      
+      get().fetchProducts();
+    } catch (error: any) {
+      set({ loading: false });
+      throw new Error(error.response?.data?.error || 'Failed to update profile');
+    }
+  },
 
-    set({ user: null, products: [], donations: [], loading: false });
+  setShowProfileSetup: (show) => {
+    set({ showProfileSetup: show });
+  },
+
+  setShowAuthModal: (show) => {
+    set({ showAuthModal: show });
   },
 
   toggleTheme: () => {
